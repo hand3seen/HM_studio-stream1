@@ -2,93 +2,87 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Headmosh Neon Network — Stream</title>
+  <title>Headmosh Neon Network — Dub Mode</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- p5 + p5.sound -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/addons/p5.sound.min.js"></script>
   <style>
     html,body{margin:0;height:100%;background:#000;font-family:ui-sans-serif,system-ui,Inter,Roboto,Arial}
-    /* Clickable overlay link (top-left tag) */
     .pump-link{
-      position:fixed;left:18px;top:18px;z-index:9;
-      background:rgba(0,0,0,.55);backdrop-filter:blur(6px);
-      border:1px solid rgba(255,255,255,.15);border-radius:12px;
-      color:#e8f3ff;text-decoration:none;padding:10px 14px;font-size:14px;line-height:1;display:flex;gap:10px;align-items:center
+      position:fixed;left:18px;top:18px;z-index:9;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);
+      border:1px solid rgba(255,255,255,.15);border-radius:12px;color:#e8f3ff;text-decoration:none;
+      padding:10px 14px;font-size:14px;line-height:1;display:flex;gap:10px;align-items:center
     }
     .pump-dot{width:8px;height:8px;border-radius:50%;background:rgb(60,200,255);box-shadow:0 0 12px 4px rgba(60,200,255,.7)}
     .qr{display:none;position:absolute;left:0;top:44px;background:#000;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:8px}
     .pump-link:hover .qr{display:block}
-    /* Fallback note for mic permission */
-    #mic-hint{position:fixed;right:18px;top:18px;color:#cde;z-index:9;font-size:12px;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.12)}
+    #mic-hint{position:fixed;right:18px;top:18px;color:#cde;z-index:9;font-size:12px;background:rgba(0,0,0,.5);
+      padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.12)}
   </style>
 </head>
 <body>
-  <!-- EDIT THESE TWO VALUES -->
   <a id="coinUrl" class="pump-link" target="_blank" rel="noreferrer">
     <span class="pump-dot"></span>
     <span id="coinText">pump.fun/coin/4QCQAkcKiYPnFWsSgGMuGeQdnrAmCKcNJkd2dm59pump</span>
-    <!-- Optional QR via quick API (hover to show). Remove if you don’t want external calls. -->
     <img class="qr" id="qr" alt="QR" />
   </a>
   <div id="mic-hint">Press <b>M</b> to (re)enable mic audio-reactivity</div>
 
 <script>
-/* ===============================
-   Headmosh Neon Network — v2
-   Todd-ready: audio-reactive, countdown, ticker, one-file
-   Keys:
+/* ====== Headmosh Neon Network — Dub/Reggae Fast React ======
+   Hotkeys:
    [M] mic on/off   [A] attract/repel
    [B] bloom        [N] palette
-   [L] logo         [G] toggle giveaway panel
+   [L] logo         [G] giveaway panel
+   [K]/[J] sensitivity up/down
+   [H] toggle extra bass bias
    [S] snapshot     [R] reset particles
-=============================== */
+============================================================ */
 
 const CONFIG = {
-  particleDensity: 0.12,         // particles per px of width (0.12 ≈ 12% of width)
-  maxSpeed: 1.35,
-  connectRadius: 190,
-  trailAlpha: 42,
+  particleDensity: 0.12,
+  maxSpeed: 1.5,                // a touch faster for snappier motion
+  connectRadius: 200,
+  trailAlpha: 40,
   bloomPasses: 2,
   showLogo: true,
   showGiveaway: true,
   bannerTitle: "HEADMOSH STUDIO",
   bannerSub: "Go Head-First.",
   coinURL: "https://pump.fun/coin/4QCQAkcKiYPnFWsSgGMuGeQdnrAmCKcNJkd2dm59pump",
-  // hourly giveaway resets every :00 (local time)
 };
 
 let particles = [];
-let pg;              // offscreen buffer
-let t = 0;
+let pg, t = 0;
 let attract = true;
 let bloom = true;
 let palettes, paletteIndex = 0;
 
-// Audio
-let mic, fft;
+// Audio responsiveness
+let mic, fft, peakLow;
 let audioEnabled = false;
-let energy = 0; // smoothed 0..1 for visuals
+let energy = 0;            // smoothed 0..1
+let sensitivity = 1.15;    // tweak live with K/J
+let extraBassBias = true;  // toggle with H
 
-// Ticker state
-let tickerMsg = "Headmosh Zine Lab • Draw. Fold. Ship. • Live on PumpFun now • !headmosh •";
+// Ticker
+let tickerMsg = "Headmosh — Dub Mode • Zine Lab live • PumpFun link in title •";
 let tickerX = 0;
 
-// URL params to override config
+// URL params (optional overrides)
 (function initParams(){
-  const params = new URLSearchParams(location.search);
-  if (params.get('title')) CONFIG.bannerTitle = params.get('title');
-  if (params.get('sub')) CONFIG.bannerSub = params.get('sub');
-  if (params.get('coin')) CONFIG.coinURL = params.get('coin');
+  const p = new URLSearchParams(location.search);
+  if (p.get('title')) CONFIG.bannerTitle = p.get('title');
+  if (p.get('sub')) CONFIG.bannerSub = p.get('sub');
+  if (p.get('coin')) CONFIG.coinURL = p.get('coin');
 })();
 
-// Pump link + QR
+// Link + QR
 const linkEl = document.getElementById('coinUrl');
 const textEl = document.getElementById('coinText');
 const qrEl = document.getElementById('qr');
 textEl.textContent = CONFIG.coinURL.replace(/^https?:\/\//,'');
 linkEl.href = CONFIG.coinURL;
-// light QR (external) — comment out if you want purely offline
 qrEl.src = "https://api.qrserver.com/v1/create-qr-code/?size=120x120&data="+encodeURIComponent(CONFIG.coinURL);
 
 class Particle {
@@ -99,22 +93,21 @@ class Particle {
     this.vy = random(-CONFIG.maxSpeed, CONFIG.maxSpeed);
   }
   move(){
-    // audio-reactive noise field
-    const ang = noise(this.x*0.001, this.y*0.001, t*0.0006) * TAU * (1.2 + energy*0.8);
-    this.vx += cos(ang) * (0.025 + energy*0.045);
-    this.vy += sin(ang) * (0.025 + energy*0.045);
+    // tighter, louder flow on bass hits
+    const ang = noise(this.x*0.0012, this.y*0.0012, t*0.0008) * TAU * (1.1 + energy*1.1);
+    const push = (0.028 + energy*0.065) * sensitivity;
+    this.vx += cos(ang) * push;
+    this.vy += sin(ang) * push;
 
-    // mouse influence
     if (mouseX>=0 && mouseY>=0 && mouseX<=width && mouseY<=height){
       const dx = mouseX - this.x, dy = mouseY - this.y;
       const d2 = dx*dx + dy*dy;
-      const force = constrain(40000/(d2+1500),0,0.18);
+      const force = constrain(42000/(d2+1400), 0, 0.22) * sensitivity;
       const s = attract ? 1 : -1;
-      this.vx += s*dx*force*0.0025;
-      this.vy += s*dy*force*0.0025;
+      this.vx += s*dx*force*0.003;
+      this.vy += s*dy*force*0.003;
     }
 
-    // speed cap
     const sp = sqrt(this.vx*this.vx + this.vy*this.vy);
     if (sp > CONFIG.maxSpeed){
       this.vx = (this.vx/sp)*CONFIG.maxSpeed;
@@ -124,7 +117,6 @@ class Particle {
     this.x += this.vx;
     this.y += this.vy;
 
-    // soft wrap
     if (this.x < -12) this.x = width+12;
     if (this.x > width+12) this.x = -12;
     if (this.y < -12) this.y = height+12;
@@ -133,7 +125,7 @@ class Particle {
   dot(g){
     g.noStroke();
     g.fill(255, 235);
-    g.circle(this.x, this.y, 2.4 + energy*0.8);
+    g.circle(this.x, this.y, 2.6 + energy*1.0);
   }
   connect(g, others){
     const cols = palettes[paletteIndex];
@@ -142,16 +134,17 @@ class Particle {
       const dx = this.x - p.x, dy = this.y - p.y;
       const d = sqrt(dx*dx + dy*dy);
       if (d < CONFIG.connectRadius){
-        const w = map(d, 0, CONFIG.connectRadius, 2.1 + energy*1.4, 0.2);
-        const a = map(d, 0, CONFIG.connectRadius, 230, 110);
+        const widthBoost = extraBassBias ? (1 + energy*1.8) : (1 + energy*1.1);
+        const w = map(d, 0, CONFIG.connectRadius, 2.4*widthBoost, 0.25);
+        const a = map(d, 0, CONFIG.connectRadius, 240, 110);
         const c = cols[floor(map(d,0,CONFIG.connectRadius,0,cols.length))%cols.length];
 
         g.stroke(c[0], c[1], c[2], a);
         g.strokeWeight(w);
 
-        // curved wire + slight jitter for “live” feel
-        const mx = (this.x + p.x)/2 + sin((this.x+t)*0.01)*6*(1+energy);
-        const my = (this.y + p.y)/2 + cos((this.y+t)*0.01)*6*(1+energy);
+        const j = 8*(1+energy*1.5);
+        const mx = (this.x + p.x)/2 + sin((this.x+t)*0.012)*j;
+        const my = (this.y + p.y)/2 + cos((this.y+t)*0.012)*j;
         g.noFill();
         g.beginShape();
         g.curveVertex(this.x, this.y);
@@ -180,15 +173,11 @@ function setup(){
   initParticles();
   pg.background(0);
 
-  // Audio init deferred until user presses M (browser policy)
-  fft = new p5.FFT(0.8, 512);
+  // Faster reaction: less smoothing, more bins
+  fft = new p5.FFT(0.35, 1024);
+  peakLow = new p5.PeakDetect(40, 140, 0.11, 20); // low band peaks; threshold slightly low, fast
 
-  // Make the link overlay track safe-area on resize
-  positionLink();
-}
-
-function positionLink(){
-  // Nothing required; CSS handles it, but keep for future safe-areas if desired
+  // (Audio starts on M)
 }
 
 function initParticles(){
@@ -198,12 +187,11 @@ function initParticles(){
 }
 
 function drawBackground(g){
-  // Subtle animated radial haze
   const cx = width*0.5 + sin(t*0.001)*66;
   const cy = height*0.5 + cos(t*0.0012)*50;
   for (let r = max(width,height); r>0; r -= 4){
     const k = map(r, 0, max(width,height), 0, 1);
-    const v = 8 + 20*(1-k)*(0.5+0.5*sin(t*0.002+energy*2.0));
+    const v = 8 + 20*(1-k)*(0.5+0.5*sin(t*0.002+energy*2.4));
     g.noStroke();
     g.fill(v, v*0.8, v*0.9, 14);
     g.circle(cx, cy, r*2);
@@ -213,26 +201,35 @@ function drawBackground(g){
 function draw(){
   t++;
 
-  // Audio energy 0..1
+  // Audio energy (bass-biased, quick)
   let e = 0;
   if (audioEnabled){
-    const spec = fft.analyze();
-    const bass = fft.getEnergy(20, 140);
-    const mid = fft.getEnergy(140, 1200);
-    const high = fft.getEnergy(1200, 8000);
-    e = (bass*0.55 + mid*0.35 + high*0.10) / 255;
-  }
-  // smooth
-  energy = lerp(energy, e, 0.12);
+    const spectrum = fft.analyze();
+    const low  = fft.getEnergy(40, 140);     // bass / kick — dub heart
+    const mid  = fft.getEnergy(140, 1200);   // snare, guitar skank
+    const high = fft.getEnergy(1200, 6000);  // hats
+    const bassBias = extraBassBias ? 0.65 : 0.50;
+    e = (low*bassBias + mid*0.30 + high*0.05) / 255;
 
-  // Trails fade
+    // detect low peaks to add quick transient punch
+    fft.analyze();
+    peakLow.update(fft);
+    if (peakLow.isDetected) {
+      e = min(1, e + 0.25); // transient bump on drops
+    }
+  }
+
+  // Faster smoothing for snappier feel
+  energy = lerp(energy, e, 0.35);
+
+  // Trails
   pg.noStroke();
   pg.fill(0, CONFIG.trailAlpha);
   pg.rect(0,0,width,height);
 
   drawBackground(pg);
 
-  // Update + draw particles
+  // Particles
   for (let p of particles) p.move();
   for (let i=0;i<particles.length;i++){
     const p = particles[i];
@@ -240,10 +237,8 @@ function draw(){
     p.connect(pg, particles.slice(i+1));
   }
 
-  // Base pass
+  // Draw
   image(pg, 0, 0);
-
-  // Bloom (screen)
   if (bloom){
     push();
     drawingContext.globalCompositeOperation = 'screen';
@@ -251,11 +246,13 @@ function draw(){
     pop();
   }
 
-  // Overlays
   scanlines();
   drawBanner();
   drawTicker();
   if (CONFIG.showGiveaway) drawGiveawayPanel();
+
+  // Small on-screen hint for tuning
+  drawHUD();
 }
 
 function scanlines(){
@@ -274,12 +271,10 @@ function drawBanner(){
   textAlign(LEFT, TOP);
   noStroke();
   fill(0, 170);
-  const padW = 330;
   textSize(42);
-  const w = textWidth(title) + padW;
+  const w = textWidth(title) + 330;
   rect(18, 72, w, 84, 16);
 
-  // “glitchy” passes
   for (let i=3;i>=0;i--){
     fill(255, 255, 255, 50 - i*10);
     text(title, 36 + jx + i*0.8, 88 + i*0.8);
@@ -294,11 +289,11 @@ function drawBanner(){
 }
 
 function drawTicker(){
-  // Scroll a simple text ticker along bottom
   const msg = tickerMsg + "  ";
   textSize(16);
   const tw = textWidth(msg);
-  tickerX -= 2 + energy*4; // faster with energy
+  // a touch faster when energy is high
+  tickerX -= (2.4 + energy*5.0);
   if (tickerX < -tw) tickerX += tw;
   noStroke();
   fill(0,140);
@@ -306,12 +301,10 @@ function drawTicker(){
   fill(230);
   textAlign(LEFT, CENTER);
   text(msg, tickerX, height-20);
-  // clone pass for seamless loop
   text(msg, tickerX + tw, height-20);
 }
 
 function drawGiveawayPanel(){
-  // Countdown to next hour
   const now = new Date();
   const nextHour = new Date(now);
   nextHour.setMinutes(0,0,0);
@@ -320,10 +313,7 @@ function drawGiveawayPanel(){
   const sec = Math.floor(ms/1000)%60;
   const min = Math.floor(ms/60000);
 
-  const label = "Giveaway in";
-  const timeStr = nf(min,2) + ":" + nf(sec,2);
-
-  const w = 210, h = 86;
+  const w = 220, h = 92;
   const x = width - w - 18, y = 18;
 
   noStroke();
@@ -332,21 +322,37 @@ function drawGiveawayPanel(){
   fill(200,230,255);
   textAlign(CENTER,CENTER);
   textSize(14);
-  text(label, x+w/2, y+24);
-  textSize(32);
+  text("Giveaway in", x+w/2, y+24);
+  textSize(34);
   fill(255);
-  text(timeStr, x+w/2, y+56);
+  text(nf(min,2)+":"+nf(sec,2), x+w/2, y+58);
+}
+
+function drawHUD(){
+  const hud = `[K/J] Sens ${sensitivity.toFixed(2)}   [H] Bass ${extraBassBias?"BIAS":"norm"}   [A] ${attract?"Attract":"Repel"}   [B] Bloom ${bloom?"On":"Off"}   [N] Palette   [L] Logo`;
+  const w = textWidth(hud) + 24;
+  noStroke();
+  fill(0, 140);
+  rect(width - w - 20, height - 50, w, 34, 10);
+  fill(230);
+  textAlign(RIGHT, CENTER);
+  textSize(14);
+  text(hud, width - 32, height - 33);
 }
 
 function keyPressed(){
-  if (key==='M' || key==='m') toggleMic();
-  if (key==='A' || key==='a') attract = !attract;
-  if (key==='B' || key==='b') bloom = !bloom;
-  if (key==='N' || key==='n') paletteIndex = (paletteIndex+1)%palettes.length;
-  if (key==='L' || key==='l') CONFIG.showLogo = !CONFIG.showLogo;
-  if (key==='G' || key==='g') CONFIG.showGiveaway = !CONFIG.showGiveaway;
-  if (key==='S' || key==='s') saveCanvas('headmosh-neon-network-v2','png');
-  if (key==='R' || key==='r') initParticles();
+  if (key==='M'||key==='m') toggleMic();
+  if (key==='A'||key==='a') attract = !attract;
+  if (key==='B'||key==='b') bloom = !bloom;
+  if (key==='N'||key==='n') paletteIndex = (paletteIndex+1)%palettes.length;
+  if (key==='L'||key==='l') CONFIG.showLogo = !CONFIG.showLogo;
+  if (key==='G'||key==='g') CONFIG.showGiveaway = !CONFIG.showGiveaway;
+  if (key==='S'||key==='s') saveCanvas('headmosh-dub-fast','png');
+  if (key==='R'||key==='r') initParticles();
+
+  if (key==='K'||key==='k') sensitivity = min(2.5, sensitivity + 0.05);
+  if (key==='J'||key==='j') sensitivity = max(0.5, sensitivity - 0.05);
+  if (key==='H'||key==='h') extraBassBias = !extraBassBias;
 }
 
 function windowResized(){
@@ -356,12 +362,9 @@ function windowResized(){
   initParticles();
 }
 
-// Mic / audio control
 async function toggleMic(){
   try{
-    if (!mic){
-      mic = new p5.AudioIn();
-    }
+    if (!mic) mic = new p5.AudioIn();
     if (!audioEnabled){
       await mic.start();
       fft.setInput(mic);
@@ -374,7 +377,8 @@ async function toggleMic(){
     }
   } catch(e){
     console.warn('Mic error:', e);
-    document.getElementById('mic-hint').textContent = 'Mic blocked — enable permissions or use OBS Audio Monitor. Press M to retry.';
+    document.getElementById('mic-hint').textContent =
+      'Mic blocked — enable permissions or use OBS Audio Monitor. Press M to retry.';
   }
 }
 </script>
