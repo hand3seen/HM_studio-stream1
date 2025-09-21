@@ -2,8 +2,9 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Headmosh Neon Network — Dub Mode</title>
+  <title>Headmosh Neon Network — Fast Beat React</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- p5 + p5.sound -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/addons/p5.sound.min.js"></script>
   <style>
@@ -21,29 +22,31 @@
   </style>
 </head>
 <body>
+  <!-- Edit URL/text as needed -->
   <a id="coinUrl" class="pump-link" target="_blank" rel="noreferrer">
     <span class="pump-dot"></span>
     <span id="coinText">pump.fun/coin/4QCQAkcKiYPnFWsSgGMuGeQdnrAmCKcNJkd2dm59pump</span>
     <img class="qr" id="qr" alt="QR" />
   </a>
-  <div id="mic-hint">Press <b>M</b> to (re)enable mic audio-reactivity</div>
+  <div id="mic-hint">Press <b>M</b> to (re)enable mic/monitor for audio-reactivity</div>
 
 <script>
-/* ====== Headmosh Neon Network — Dub/Reggae Fast React ======
+/* ===== Headmosh Neon Network — FAST REACT =====
    Hotkeys:
-   [M] mic on/off   [A] attract/repel
-   [B] bloom        [N] palette
-   [L] logo         [G] giveaway panel
+   [M] mic on/off     [A] attract/repel
+   [B] bloom          [N] palette
+   [L] logo           [G] giveaway panel
    [K]/[J] sensitivity up/down
+   [T] turbo sensitivity
    [H] toggle extra bass bias
-   [S] snapshot     [R] reset particles
-============================================================ */
+   [S] snapshot       [R] reset particles
+================================================ */
 
 const CONFIG = {
   particleDensity: 0.12,
-  maxSpeed: 1.5,                // a touch faster for snappier motion
+  maxSpeed: 1.5,
   connectRadius: 200,
-  trailAlpha: 40,
+  trailAlpha: 34,          // a bit lower for crisp strobe
   bloomPasses: 2,
   showLogo: true,
   showGiveaway: true,
@@ -58,18 +61,18 @@ let attract = true;
 let bloom = true;
 let palettes, paletteIndex = 0;
 
-// Audio responsiveness
-let mic, fft, peakLow;
+// Audio globals
+let mic, fft, amp, peakLow;
 let audioEnabled = false;
-let energy = 0;            // smoothed 0..1
-let sensitivity = 1.15;    // tweak live with K/J
-let extraBassBias = true;  // toggle with H
+let energy = 0;              // enveloped display energy
+let sensitivity = 1.35;
+let extraBassBias = true;
 
 // Ticker
-let tickerMsg = "Headmosh — Dub Mode • Zine Lab live • PumpFun link in title •";
+let tickerMsg = "Headmosh — Fast React • Zine Lab • PumpFun link in title •";
 let tickerX = 0;
 
-// URL params (optional overrides)
+// URL overrides
 (function initParams(){
   const p = new URLSearchParams(location.search);
   if (p.get('title')) CONFIG.bannerTitle = p.get('title');
@@ -85,6 +88,7 @@ textEl.textContent = CONFIG.coinURL.replace(/^https?:\/\//,'');
 linkEl.href = CONFIG.coinURL;
 qrEl.src = "https://api.qrserver.com/v1/create-qr-code/?size=120x120&data="+encodeURIComponent(CONFIG.coinURL);
 
+// ---------------- Particles ----------------
 class Particle {
   constructor(){
     this.x = random(width);
@@ -93,11 +97,10 @@ class Particle {
     this.vy = random(-CONFIG.maxSpeed, CONFIG.maxSpeed);
   }
   move(){
-    // tighter, louder flow on bass hits
-    const ang = noise(this.x*0.0012, this.y*0.0012, t*0.0008) * TAU * (1.1 + energy*1.1);
-    const push = (0.028 + energy*0.065) * sensitivity;
-    this.vx += cos(ang) * push;
-    this.vy += sin(ang) * push;
+    const ang = noise(this.x*0.0012, this.y*0.0012, t*0.001) * TAU * (1.1 + energy*1.2);
+    const push = (0.026 + energy*0.06 + energy*energy*0.12) * sensitivity; // strong punch on hits
+    this.vx += Math.cos(ang) * push;
+    this.vy += Math.sin(ang) * push;
 
     if (mouseX>=0 && mouseY>=0 && mouseX<=width && mouseY<=height){
       const dx = mouseX - this.x, dy = mouseY - this.y;
@@ -108,7 +111,7 @@ class Particle {
       this.vy += s*dy*force*0.003;
     }
 
-    const sp = sqrt(this.vx*this.vx + this.vy*this.vy);
+    const sp = Math.hypot(this.vx, this.vy);
     if (sp > CONFIG.maxSpeed){
       this.vx = (this.vx/sp)*CONFIG.maxSpeed;
       this.vy = (this.vy/sp)*CONFIG.maxSpeed;
@@ -132,19 +135,19 @@ class Particle {
     for (let i=0;i<others.length;i++){
       const p = others[i];
       const dx = this.x - p.x, dy = this.y - p.y;
-      const d = sqrt(dx*dx + dy*dy);
+      const d = Math.hypot(dx, dy);
       if (d < CONFIG.connectRadius){
-        const widthBoost = extraBassBias ? (1 + energy*1.8) : (1 + energy*1.1);
-        const w = map(d, 0, CONFIG.connectRadius, 2.4*widthBoost, 0.25);
+        const widthBoost = 1.0 + energy*2.2 + energy*energy*1.4;
+        const w = map(d, 0, CONFIG.connectRadius, 2.6*widthBoost, 0.25);
         const a = map(d, 0, CONFIG.connectRadius, 240, 110);
-        const c = cols[floor(map(d,0,CONFIG.connectRadius,0,cols.length))%cols.length];
+        const c = cols[Math.floor(map(d,0,CONFIG.connectRadius,0,cols.length))%cols.length];
 
         g.stroke(c[0], c[1], c[2], a);
         g.strokeWeight(w);
 
         const j = 8*(1+energy*1.5);
-        const mx = (this.x + p.x)/2 + sin((this.x+t)*0.012)*j;
-        const my = (this.y + p.y)/2 + cos((this.y+t)*0.012)*j;
+        const mx = (this.x + p.x)/2 + Math.sin((this.x+t)*0.012)*j;
+        const my = (this.y + p.y)/2 + Math.cos((this.y+t)*0.012)*j;
         g.noFill();
         g.beginShape();
         g.curveVertex(this.x, this.y);
@@ -158,229 +161,11 @@ class Particle {
   }
 }
 
+// --------------- Setup/Draw ---------------
 function setup(){
   pixelDensity(1);
   createCanvas(windowWidth, windowHeight);
   pg = createGraphics(width, height);
 
   palettes = [
-    [ [10,240,255], [180,90,255], [255,80,180], [255,210,60] ],
-    [ [90,200,255], [90,255,160], [255,120,120], [250,250,180] ],
-    [ [255,100,40], [255,220,40], [80,220,255], [120,120,255] ],
-    [ [140,255,220], [255,80,140], [110,150,255], [255,220,160] ],
-  ];
-
-  initParticles();
-  pg.background(0);
-
-  // Faster reaction: less smoothing, more bins
-  fft = new p5.FFT(0.35, 1024);
-  peakLow = new p5.PeakDetect(40, 140, 0.11, 20); // low band peaks; threshold slightly low, fast
-
-  // (Audio starts on M)
-}
-
-function initParticles(){
-  particles.length = 0;
-  const count = floor(width * CONFIG.particleDensity);
-  for (let i=0;i<count;i++) particles.push(new Particle());
-}
-
-function drawBackground(g){
-  const cx = width*0.5 + sin(t*0.001)*66;
-  const cy = height*0.5 + cos(t*0.0012)*50;
-  for (let r = max(width,height); r>0; r -= 4){
-    const k = map(r, 0, max(width,height), 0, 1);
-    const v = 8 + 20*(1-k)*(0.5+0.5*sin(t*0.002+energy*2.4));
-    g.noStroke();
-    g.fill(v, v*0.8, v*0.9, 14);
-    g.circle(cx, cy, r*2);
-  }
-}
-
-function draw(){
-  t++;
-
-  // Audio energy (bass-biased, quick)
-  let e = 0;
-  if (audioEnabled){
-    const spectrum = fft.analyze();
-    const low  = fft.getEnergy(40, 140);     // bass / kick — dub heart
-    const mid  = fft.getEnergy(140, 1200);   // snare, guitar skank
-    const high = fft.getEnergy(1200, 6000);  // hats
-    const bassBias = extraBassBias ? 0.65 : 0.50;
-    e = (low*bassBias + mid*0.30 + high*0.05) / 255;
-
-    // detect low peaks to add quick transient punch
-    fft.analyze();
-    peakLow.update(fft);
-    if (peakLow.isDetected) {
-      e = min(1, e + 0.25); // transient bump on drops
-    }
-  }
-
-  // Faster smoothing for snappier feel
-  energy = lerp(energy, e, 0.35);
-
-  // Trails
-  pg.noStroke();
-  pg.fill(0, CONFIG.trailAlpha);
-  pg.rect(0,0,width,height);
-
-  drawBackground(pg);
-
-  // Particles
-  for (let p of particles) p.move();
-  for (let i=0;i<particles.length;i++){
-    const p = particles[i];
-    p.dot(pg);
-    p.connect(pg, particles.slice(i+1));
-  }
-
-  // Draw
-  image(pg, 0, 0);
-  if (bloom){
-    push();
-    drawingContext.globalCompositeOperation = 'screen';
-    for (let i=0;i<CONFIG.bloomPasses;i++) image(pg, 0, 0);
-    pop();
-  }
-
-  scanlines();
-  drawBanner();
-  drawTicker();
-  if (CONFIG.showGiveaway) drawGiveawayPanel();
-
-  // Small on-screen hint for tuning
-  drawHUD();
-}
-
-function scanlines(){
-  stroke(255, 8);
-  strokeWeight(1);
-  for (let y=0; y<height; y+=3) line(0,y,width,y);
-}
-
-function drawBanner(){
-  if (!CONFIG.showLogo) return;
-  const title = CONFIG.bannerTitle;
-  const sub = CONFIG.bannerSub;
-  const jx = (noise(t*0.02)-0.5)*2.0;
-
-  push();
-  textAlign(LEFT, TOP);
-  noStroke();
-  fill(0, 170);
-  textSize(42);
-  const w = textWidth(title) + 330;
-  rect(18, 72, w, 84, 16);
-
-  for (let i=3;i>=0;i--){
-    fill(255, 255, 255, 50 - i*10);
-    text(title, 36 + jx + i*0.8, 88 + i*0.8);
-  }
-  fill(255);
-  text(title, 36 + jx, 88);
-
-  textSize(18);
-  fill(220);
-  text(sub, 36, 124);
-  pop();
-}
-
-function drawTicker(){
-  const msg = tickerMsg + "  ";
-  textSize(16);
-  const tw = textWidth(msg);
-  // a touch faster when energy is high
-  tickerX -= (2.4 + energy*5.0);
-  if (tickerX < -tw) tickerX += tw;
-  noStroke();
-  fill(0,140);
-  rect(0, height-40, width, 40);
-  fill(230);
-  textAlign(LEFT, CENTER);
-  text(msg, tickerX, height-20);
-  text(msg, tickerX + tw, height-20);
-}
-
-function drawGiveawayPanel(){
-  const now = new Date();
-  const nextHour = new Date(now);
-  nextHour.setMinutes(0,0,0);
-  if (nextHour <= now) nextHour.setHours(nextHour.getHours()+1);
-  const ms = nextHour - now;
-  const sec = Math.floor(ms/1000)%60;
-  const min = Math.floor(ms/60000);
-
-  const w = 220, h = 92;
-  const x = width - w - 18, y = 18;
-
-  noStroke();
-  fill(0,150);
-  rect(x, y, w, h, 14);
-  fill(200,230,255);
-  textAlign(CENTER,CENTER);
-  textSize(14);
-  text("Giveaway in", x+w/2, y+24);
-  textSize(34);
-  fill(255);
-  text(nf(min,2)+":"+nf(sec,2), x+w/2, y+58);
-}
-
-function drawHUD(){
-  const hud = `[K/J] Sens ${sensitivity.toFixed(2)}   [H] Bass ${extraBassBias?"BIAS":"norm"}   [A] ${attract?"Attract":"Repel"}   [B] Bloom ${bloom?"On":"Off"}   [N] Palette   [L] Logo`;
-  const w = textWidth(hud) + 24;
-  noStroke();
-  fill(0, 140);
-  rect(width - w - 20, height - 50, w, 34, 10);
-  fill(230);
-  textAlign(RIGHT, CENTER);
-  textSize(14);
-  text(hud, width - 32, height - 33);
-}
-
-function keyPressed(){
-  if (key==='M'||key==='m') toggleMic();
-  if (key==='A'||key==='a') attract = !attract;
-  if (key==='B'||key==='b') bloom = !bloom;
-  if (key==='N'||key==='n') paletteIndex = (paletteIndex+1)%palettes.length;
-  if (key==='L'||key==='l') CONFIG.showLogo = !CONFIG.showLogo;
-  if (key==='G'||key==='g') CONFIG.showGiveaway = !CONFIG.showGiveaway;
-  if (key==='S'||key==='s') saveCanvas('headmosh-dub-fast','png');
-  if (key==='R'||key==='r') initParticles();
-
-  if (key==='K'||key==='k') sensitivity = min(2.5, sensitivity + 0.05);
-  if (key==='J'||key==='j') sensitivity = max(0.5, sensitivity - 0.05);
-  if (key==='H'||key==='h') extraBassBias = !extraBassBias;
-}
-
-function windowResized(){
-  resizeCanvas(windowWidth, windowHeight);
-  pg = createGraphics(width, height);
-  pg.background(0);
-  initParticles();
-}
-
-async function toggleMic(){
-  try{
-    if (!mic) mic = new p5.AudioIn();
-    if (!audioEnabled){
-      await mic.start();
-      fft.setInput(mic);
-      audioEnabled = true;
-      document.getElementById('mic-hint').style.display = 'none';
-    } else {
-      mic.stop();
-      audioEnabled = false;
-      document.getElementById('mic-hint').style.display = 'block';
-    }
-  } catch(e){
-    console.warn('Mic error:', e);
-    document.getElementById('mic-hint').textContent =
-      'Mic blocked — enable permissions or use OBS Audio Monitor. Press M to retry.';
-  }
-}
-</script>
-</body>
-</html>
+    [ [10,240,255], [180,90,255], [255,80,180]]()
