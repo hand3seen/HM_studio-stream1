@@ -1,37 +1,99 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Audio Test Visualizer</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Audio Routing Test (BlackHole)</title>
 <style>
-  html,body { margin:0; padding:0; background:#000; overflow:hidden; }
+  html,body { margin:0; padding:0; background:#000; color:#fff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial; }
+  #ui { position:fixed; top:12px; left:12px; background:rgba(0,0,0,.5); padding:10px 12px; border:1px solid #333; border-radius:10px; }
+  #start { padding:8px 12px; font-weight:700; border-radius:8px; border:1px solid #555; background:#111; color:#0f0; cursor:pointer; }
+  #msg { margin-top:8px; font-size:12px; max-width:380px; line-height:1.3; color:#ccc; }
   canvas { display:block; }
 </style>
-<!-- p5.js core + sound -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
 </head>
 <body>
+<div id="ui">
+  <button id="start">Start Audio</button>
+  <div id="msg">
+    1) Click <b>Start Audio</b><br>
+    2) When prompted, select the microphone device: <b>BlackHole 2ch</b><br>
+    3) In Chrome, you can change it via the 🔒 icon → <b>Site settings → Microphone</b> → <b>BlackHole 2ch</b>.
+    <div id="devInfo" style="margin-top:6px;"></div>
+    <div id="level" style="margin-top:6px; font-size:13px; color:#9f9;"></div>
+  </div>
+</div>
+
 <script>
-let mic;
+let mic, amp;
+let started = false;
+let lastNonZeroT = 0;
 
 function setup(){
   createCanvas(windowWidth, windowHeight);
-  // ask for mic permission (select BlackHole in browser settings)
-  mic = new p5.AudioIn();
-  mic.start();
   noStroke();
+  fill(0, 255, 180);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  // List devices for debugging (helps confirm BlackHole is visible)
+  if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+    navigator.mediaDevices.enumerateDevices().then(list => {
+      const lines = list.map(d => `${d.kind}: ${d.label || '(no label)'} id=${d.deviceId}`).join('<br>');
+      document.getElementById('devInfo').innerHTML = `<b>Devices:</b><br>${lines}`;
+    });
+  }
+
+  document.getElementById('start').addEventListener('click', async () => {
+    try {
+      // User gesture unlock
+      await userStartAudio();
+      await getAudioContext().resume();
+
+      // Start mic (browser will prompt for permission if not granted)
+      mic = new p5.AudioIn();
+      mic.start(() => {
+        // connect amplitude analyzer (more reliable meter)
+        amp = new p5.Amplitude();
+        amp.setInput(mic);
+        started = true;
+      }, (err) => {
+        document.getElementById('level').innerHTML = `<span style="color:#f77">Mic error: ${err?.message || err}</span>`;
+      });
+    } catch (e) {
+      document.getElementById('level').innerHTML = `<span style="color:#f77">Audio start failed: ${e?.message || e}</span>`;
+    }
+  });
 }
 
 function draw(){
   background(0);
-  // get mic level (0–1)
-  let level = mic.getLevel();
-  // map to circle size
-  let size = map(level, 0, 0.3, 50, width);
-  fill(0, 255, 180);
+
+  if (!started) {
+    fill(180);
+    text("Click START AUDIO, then choose 'BlackHole 2ch' as the microphone.", width/2, height/2);
+    return;
+  }
+
+  // prefer amplitude meter; fallback to mic.getLevel if needed
+  let level = amp ? amp.getLevel() : (mic ? mic.getLevel() : 0);
+
+  // draw pulse
+  let size = map(level, 0, 0.3, 50, min(width, height));
   ellipse(width/2, height/2, size, size);
+
+  // show numeric level + hint if it's stuck at ~0
+  const now = millis();
+  if (level > 0.001) lastNonZeroT = now;
+
+  let stuckMs = now - lastNonZeroT;
+  let hint = (stuckMs > 4000)
+    ? "No signal detected.\n• In Chrome: click the lock icon → Site settings → Microphone → select “BlackHole 2ch”.\n• macOS: System Settings → Sound → Output = Multi-Output (Speakers + BlackHole). Play music and try again."
+    : "OK";
+
+  document.getElementById('level').innerText =
+    `Level: ${level.toFixed(5)}  |  Status: ${hint}`;
 }
 
 function windowResized(){
@@ -40,4 +102,3 @@ function windowResized(){
 </script>
 </body>
 </html>
-
