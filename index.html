@@ -1,104 +1,382 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Audio Routing Test (BlackHole)</title>
-<style>
-  html,body { margin:0; padding:0; background:#000; color:#fff; font-family:system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial; }
-  #ui { position:fixed; top:12px; left:12px; background:rgba(0,0,0,.5); padding:10px 12px; border:1px solid #333; border-radius:10px; }
-  #start { padding:8px 12px; font-weight:700; border-radius:8px; border:1px solid #555; background:#111; color:#0f0; cursor:pointer; }
-  #msg { margin-top:8px; font-size:12px; max-width:380px; line-height:1.3; color:#ccc; }
-  canvas { display:block; }
-</style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
+  <meta charset="utf-8" />
+  <title>Headmosh Neon Network — Fast & Lean (No-Mouse)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- p5 + p5.sound -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/addons/p5.sound.min.js"></script>
+  <style>
+    html,body{margin:0;height:100%;background:#000;font-family:ui-sans-serif,system-ui,Inter,Roboto,Arial;cursor:default}
+    .pump-link{
+      position:fixed;left:18px;top:18px;z-index:9;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);
+      border:1px solid rgba(255,255,255,.15);border-radius:12px;color:#e8f3ff;text-decoration:none;
+      padding:10px 14px;font-size:14px;line-height:1;display:flex;gap:10px;align-items:center
+    }
+    .pump-dot{width:8px;height:8px;border-radius:50%;background:rgb(60,200,255);box-shadow:0 0 12px 4px rgba(60,200,255,.7)}
+    #mic-hint{position:fixed;right:18px;top:18px;color:#cde;z-index:9;font-size:12px;background:rgba(0,0,0,.5);
+      padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.12)}
+  </style>
 </head>
 <body>
-<div id="ui">
-  <button id="start">Start Audio</button>
-  <div id="msg">
-    1) Click <b>Start Audio</b><br>
-    2) When prompted, select the microphone device: <b>BlackHole 2ch</b><br>
-    3) In Chrome, you can change it via the 🔒 icon → <b>Site settings → Microphone</b> → <b>BlackHole 2ch</b>.
-    <div id="devInfo" style="margin-top:6px;"></div>
-    <div id="level" style="margin-top:6px; font-size:13px; color:#9f9;"></div>
-  </div>
-</div>
+  <!-- Edit URL/text as needed -->
+  <a id="coinUrl" class="pump-link" target="_blank" rel="noreferrer">
+    <span class="pump-dot"></span>
+    <span id="coinText">pump.fun/coin/4QCQAkcKiYPnFWsSgGMuGeQdnrAmCKcNJkd2dm59pump</span>
+  </a>
+  <div id="mic-hint">Press <b>M</b> to (re)enable mic/monitor for audio-reactivity</div>
 
 <script>
-let mic, amp;
-let started = false;
-let lastNonZeroT = 0;
+/* ===== Headmosh Neon Network — FAST & LEAN (No Mouse Influence) =====
+   Hotkeys:
+   [M] mic on/off     [A] attract/repel (kept, but no mouse pull)
+   [B] bloom          [N] palette
+   [L] logo           [G] giveaway panel
+   [K]/[J] sensitivity up/down
+   [T] turbo sensitivity
+   [H] toggle extra bass bias
+   [S] snapshot       [R] reset particles
+================================================================= */
 
-function setup(){
-  createCanvas(windowWidth, windowHeight);
-  noStroke();
-  fill(0, 255, 180);
-  textAlign(CENTER, CENTER);
-  textSize(14);
-  // List devices for debugging (helps confirm BlackHole is visible)
-  if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-    navigator.mediaDevices.enumerateDevices().then(list => {
-      const lines = list.map(d => `${d.kind}: ${d.label || '(no label)'} id=${d.deviceId}`).join('<br>');
-      document.getElementById('devInfo').innerHTML = `<b>Devices:</b><br>${lines}`;
-    });
+const CONFIG = {
+  particleDensity: 0.09,
+  maxSpeed: 1.5,
+  connectRadius: 170,
+  trailAlpha: 36,
+  bloomPasses: 1,
+  showLogo: true,
+  showGiveaway: true,
+  bannerTitle: "HEADMOSH STUDIO",
+  bannerSub: "Go Head-First.",
+  coinURL: "https://pump.fun/coin/4QCQAkcKiYPnFWsSgGMuGeQdnrAmCKcNJkd2dm59pump",
+};
+
+const MAX_CONNECTIONS_PER_PARTICLE = 20;
+
+let particles = [];
+let pg, t = 0;
+let attract = true; // kept for compatibility (no effect on mouse)
+let bloom = true;
+let palettes, paletteIndex = 0;
+
+// Audio
+let mic, fft, amp, peakLow;
+let audioEnabled = false;
+let energy = 0;
+let sensitivity = 1.35;
+let extraBassBias = true;
+
+// Ticker
+let tickerMsg = "Headmosh — Fast & Lean • Zine Lab • PumpFun link in title •";
+let tickerX = 0;
+
+// URL overrides
+(function initParams(){
+  const p = new URLSearchParams(location.search);
+  if (p.get('title')) CONFIG.bannerTitle = p.get('title');
+  if (p.get('sub')) CONFIG.bannerSub = p.get('sub');
+  if (p.get('coin')) CONFIG.coinURL = p.get('coin');
+})();
+document.getElementById('coinText').textContent = CONFIG.coinURL.replace(/^https?:\/\//,'');
+document.getElementById('coinUrl').href = CONFIG.coinURL;
+
+// ---------------- Particles ----------------
+class Particle {
+  constructor(){
+    this.x = random(width);
+    this.y = random(height);
+    this.vx = random(-CONFIG.maxSpeed, CONFIG.maxSpeed);
+    this.vy = random(-CONFIG.maxSpeed, CONFIG.maxSpeed);
   }
+  move(){
+    // Flow field motion only (no mouse influence)
+    const ang = noise(this.x*0.0012, this.y*0.0012, t*0.001) * TAU * (1.1 + energy*1.2);
+    const push = (0.026 + energy*0.06 + energy*energy*0.12) * sensitivity;
+    this.vx += Math.cos(ang) * push;
+    this.vy += Math.sin(ang) * push;
 
-  document.getElementById('start').addEventListener('click', async () => {
-    try {
-      // User gesture unlock
-      await userStartAudio();
-      await getAudioContext().resume();
-
-      // Start mic (browser will prompt for permission if not granted)
-      mic = new p5.AudioIn();
-      mic.start(() => {
-        // connect amplitude analyzer (more reliable meter)
-        amp = new p5.Amplitude();
-        amp.setInput(mic);
-        started = true;
-      }, (err) => {
-        document.getElementById('level').innerHTML = `<span style="color:#f77">Mic error: ${err?.message || err}</span>`;
-      });
-    } catch (e) {
-      document.getElementById('level').innerHTML = `<span style="color:#f77">Audio start failed: ${e?.message || e}</span>`;
+    // Speed clamp
+    const sp = Math.hypot(this.vx, this.vy);
+    if (sp > CONFIG.maxSpeed){
+      this.vx = (this.vx/sp)*CONFIG.maxSpeed;
+      this.vy = (this.vy/sp)*CONFIG.maxSpeed;
     }
-  });
+
+    // Integrate
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // Wrap
+    if (this.x < -12) this.x = width+12;
+    if (this.x > width+12) this.x = -12;
+    if (this.y < -12) this.y = height+12;
+    if (this.y > height+12) this.y = -12;
+  }
+  dot(g){
+    g.noStroke();
+    g.fill(255, 235);
+    g.circle(this.x, this.y, 2.6 + energy*1.0);
+  }
+  connect(g, others){
+    const cols = palettes[paletteIndex];
+    let links = 0;
+    for (let i=0;i<others.length && links<MAX_CONNECTIONS_PER_PARTICLE;i++){
+      const p = others[i];
+      const dx = this.x - p.x, dy = this.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d < CONFIG.connectRadius){
+        const widthBoost = 1.0 + energy*2.0 + energy*energy*1.2;
+        const w = map(d, 0, CONFIG.connectRadius, 2.4*widthBoost, 0.25);
+        const a = map(d, 0, CONFIG.connectRadius, 236, 110);
+        const c = cols[Math.floor(map(d,0,CONFIG.connectRadius,0,cols.length))%cols.length];
+
+        g.stroke(c[0], c[1], c[2], a);
+        g.strokeWeight(w);
+
+        const j = 6*(1+energy);
+        const mx = (this.x + p.x)/2 + Math.sin((this.x+t)*0.012)*j;
+        const my = (this.y + p.y)/2 + Math.cos((this.y+t)*0.012)*j;
+        g.noFill();
+        g.beginShape();
+        g.curveVertex(this.x, this.y);
+        g.curveVertex(this.x, this.y);
+        g.curveVertex(mx, my);
+        g.curveVertex(p.x, p.y);
+        g.curveVertex(p.x, p.y);
+        g.endShape();
+
+        links++;
+      }
+    }
+  }
+}
+
+// --------------- Setup/Draw ---------------
+function setup(){
+  pixelDensity(1);
+  createCanvas(windowWidth, windowHeight);
+  pg = createGraphics(width, height);
+
+  palettes = [
+    [ [10,240,255], [180,90,255], [255,80,180], [255,210,60] ],
+    [ [90,200,255], [90,255,160], [255,120,120], [250,250,180] ],
+    [ [255,100,40], [255,220,40], [80,220,255], [120,120,255] ],
+    [ [140,255,220], [255,80,140], [110,150,255], [255,220,160] ],
+  ];
+
+  initParticles();
+  pg.background(0);
+
+  // Fast-react audio
+  fft = new p5.FFT(0.2, 1024);
+  amp = new p5.Amplitude(0.04);
+  peakLow = new p5.PeakDetect(40, 140, 0.10, 15);
+}
+
+function initParticles(){
+  particles.length = 0;
+  const count = Math.floor(width * CONFIG.particleDensity);
+  for (let i=0;i<count;i++) particles.push(new Particle());
+}
+
+function drawBackground(g){
+  const cx = width*0.5 + Math.sin(t*0.001)*66;
+  const cy = height*0.5 + Math.cos(t*0.0012)*50;
+  for (let r = Math.max(width,height); r>0; r -= 8){
+    const k = map(r, 0, Math.max(width,height), 0, 1);
+    const v = 8 + 20*(1-k)*(0.5+0.5*Math.sin(t*0.002+energy*2.4));
+    g.noStroke();
+    g.fill(v, v*0.8, v*0.9, 14);
+    g.circle(cx, cy, r*2);
+  }
 }
 
 function draw(){
-  background(0);
+  t++;
 
-  if (!started) {
-    fill(180);
-    text("Click START AUDIO, then choose 'BlackHole 2ch' as the microphone.", width/2, height/2);
-    return;
+  // ---------- ENERGY ENVELOPE ----------
+  const ATTACK = 0.9;
+  const DECAY  = 0.18;
+  const BASS_BIAS = extraBassBias ? 0.70 : 0.55;
+
+  let target = 0;
+  if (audioEnabled){
+    const spectrum = fft.analyze();
+    const low  = fft.getEnergy(40, 140);
+    const mid  = fft.getEnergy(140, 1200);
+    const high = fft.getEnergy(1200, 6000);
+
+    let e = (low * BASS_BIAS + mid * 0.25 + high * 0.05) / 255;
+
+    const lvl = amp.getLevel();
+    e = Math.max(e, lvl * 3.5);
+
+    peakLow.update(fft);
+    if (peakLow.isDetected) e = Math.min(1, e + 0.45);
+
+    target = Math.min(1, e * sensitivity);
+  }
+  energy += (target - energy) * (target > energy ? ATTACK : DECAY);
+
+  // ---------- Render ----------
+  pg.noStroke();
+  pg.fill(0, CONFIG.trailAlpha);
+  pg.rect(0,0,width,height);
+
+  drawBackground(pg);
+
+  for (let p of particles) p.move();
+  for (let i=0;i<particles.length;i++){
+    const p = particles[i];
+    p.dot(pg);
+    p.connect(pg, particles.slice(i+1));
   }
 
-  // prefer amplitude meter; fallback to mic.getLevel if needed
-  let level = amp ? amp.getLevel() : (mic ? mic.getLevel() : 0);
+  image(pg, 0, 0);
 
-  // draw pulse
-  let size = map(level, 0, 0.3, 50, min(width, height));
-  ellipse(width/2, height/2, size, size);
+  if (bloom){
+    push();
+    drawingContext.globalCompositeOperation = 'screen';
+    for (let i=0;i<CONFIG.bloomPasses;i++) image(pg, 0, 0);
+    pop();
+  }
 
-  // show numeric level + hint if it's stuck at ~0
-  const now = millis();
-  if (level > 0.001) lastNonZeroT = now;
+  if ((frameCount & 3) === 0) scanlines();
 
-  let stuckMs = now - lastNonZeroT;
-  let hint = (stuckMs > 4000)
-    ? "No signal detected.\n• In Chrome: click the lock icon → Site settings → Microphone → select “BlackHole 2ch”.\n• macOS: System Settings → Sound → Output = Multi-Output (Speakers + BlackHole). Play music and try again."
-    : "OK";
+  drawBanner();
+  drawTicker();
+  if (CONFIG.showGiveaway) drawGiveawayPanel();
+  drawHUD();
+}
 
-  document.getElementById('level').innerText =
-    `Level: ${level.toFixed(5)}  |  Status: ${hint}`;
+function scanlines(){
+  stroke(255, 8);
+  strokeWeight(1);
+  for (let y=0; y<height; y+=3) line(0,y,width,y);
+}
+
+function drawBanner(){
+  if (!CONFIG.showLogo) return;
+  const title = CONFIG.bannerTitle;
+  const sub = CONFIG.bannerSub;
+  const jx = (noise(t*0.02)-0.5)*2.0;
+
+  push();
+  textAlign(LEFT, TOP);
+  noStroke();
+  fill(0, 170);
+  textSize(42);
+  const w = textWidth(title) + 260;
+  rect(18, 72, w, 84, 16);
+
+  fill(255, 255, 255, 40);
+  text(title, 36 + jx + 0.8, 88 + 0.8);
+  fill(255);
+  text(title, 36 + jx, 88);
+
+  textSize(18);
+  fill(220);
+  text(sub, 36, 124);
+  pop();
+}
+
+function drawTicker(){
+  const msg = tickerMsg + "  ";
+  textSize(16);
+  const tw = textWidth(msg);
+  tickerX -= (2.4 + energy*4.8);
+  if (tickerX < -tw) tickerX += tw;
+  noStroke();
+  fill(0,140);
+  rect(0, height-40, width, 40);
+  fill(230);
+  textAlign(LEFT, CENTER);
+  text(msg, tickerX, height-20);
+  text(msg, tickerX + tw, height-20);
+}
+
+function drawGiveawayPanel(){
+  const now = new Date();
+  const nextHour = new Date(now);
+  nextHour.setMinutes(0,0,0);
+  if (nextHour <= now) nextHour.setHours(nextHour.getHours()+1);
+  const ms = nextHour - now;
+  const sec = Math.floor(ms/1000)%60;
+  const min = Math.floor(ms/60000);
+
+  const w = 210, h = 86;
+  const x = width - w - 18, y = 18;
+
+  noStroke();
+  fill(0,150);
+  rect(x, y, w, h, 14);
+  fill(200,230,255);
+  textAlign(CENTER,CENTER);
+  textSize(14);
+  text("Giveaway in", x+w/2, y+24);
+  textSize(32);
+  fill(255);
+  text(nf(min,2)+":"+nf(sec,2), x+w/2, y+56);
+}
+
+function drawHUD(){
+  const hud = `[K/J] Sens ${sensitivity.toFixed(2)}  [T] Turbo  [H] Bass ${extraBassBias?"BIAS":"norm"}  [A] ${attract?"Attract":"Repel"}  [B] Bloom ${bloom?"On":"Off"}  [N] Palette  [L] Logo`;
+  const w = textWidth(hud) + 24;
+  noStroke();
+  fill(0, 140);
+  rect(width - w - 20, height - 50, w, 34, 10);
+  fill(230);
+  textAlign(RIGHT, CENTER);
+  textSize(14);
+  text(hud, width - 32, height - 33);
+}
+
+function keyPressed(){
+  if (key==='M'||key==='m') toggleMic();
+  if (key==='A'||key==='a') attract = !attract; // no mouse effect, safe to keep
+  if (key==='B'||key==='b') bloom = !bloom;
+  if (key==='N'||key==='n') paletteIndex = (paletteIndex+1)%palettes.length;
+  if (key==='L'||key==='l') CONFIG.showLogo = !CONFIG.showLogo;
+  if (key==='G'||key==='g') CONFIG.showGiveaway = !CONFIG.showGiveaway;
+  if (key==='S'||key==='s') saveCanvas('headmosh-fast-lean','png');
+  if (key==='R'||key==='r') initParticles();
+
+  if (key==='K'||key==='k') sensitivity = Math.min(3.0, sensitivity + 0.05);
+  if (key==='J'||key==='j') sensitivity = Math.max(0.5, sensitivity - 0.05);
+  if (key==='T'||key==='t') sensitivity = Math.min(3.0, sensitivity + 0.25);
+  if (key==='H'||key==='h') extraBassBias = !extraBassBias;
 }
 
 function windowResized(){
   resizeCanvas(windowWidth, windowHeight);
+  pg = createGraphics(width, height);
+  pg.background(0);
+  initParticles();
+}
+
+// Mic / monitor toggle
+async function toggleMic(){
+  try{
+    if (!mic) mic = new p5.AudioIn();
+    if (!audioEnabled){
+      await mic.start();
+      fft.setInput(mic);
+      amp.setInput(mic);
+      audioEnabled = true;
+      document.getElementById('mic-hint').style.display = 'none';
+    } else {
+      mic.stop();
+      audioEnabled = false;
+      document.getElementById('mic-hint').style.display = 'block';
+    }
+  } catch(e){
+    console.warn('Mic error:', e);
+    document.getElementById('mic-hint').textContent =
+      'Mic blocked — enable permissions or use OBS Audio Monitor. Press M to retry.';
+  }
 }
 </script>
 </body>
 </html>
+
