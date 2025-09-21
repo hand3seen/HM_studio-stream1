@@ -2,9 +2,8 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Headmosh Neon Network — Fast & Lean (No-Mouse)</title>
+  <title>Headmosh Neon Network — Punchy Audio Reactive</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- p5 + p5.sound -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/addons/p5.sound.min.js"></script>
   <style>
@@ -17,59 +16,56 @@
     .pump-dot{width:8px;height:8px;border-radius:50%;background:rgb(60,200,255);box-shadow:0 0 12px 4px rgba(60,200,255,.7)}
     #mic-hint{position:fixed;right:18px;top:18px;color:#cde;z-index:9;font-size:12px;background:rgba(0,0,0,.5);
       padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.12)}
+    #meter{position:fixed;left:18px;bottom:18px;width:240px;height:10px;background:#111;border:1px solid #333;border-radius:999px;overflow:hidden}
+    #meter > i{display:block;height:100%;width:0;background:linear-gradient(90deg,#27ffbe,#4ca5ff)}
   </style>
 </head>
 <body>
-  <!-- Edit URL/text as needed -->
   <a id="coinUrl" class="pump-link" target="_blank" rel="noreferrer">
     <span class="pump-dot"></span>
     <span id="coinText">pump.fun/coin/4QCQAkcKiYPnFWsSgGMuGeQdnrAmCKcNJkd2dm59pump</span>
   </a>
-  <div id="mic-hint">Press <b>M</b> to (re)enable mic/monitor for audio-reactivity</div>
+  <div id="mic-hint">Press <b>M</b> to (re)enable mic/monitor • [K/J] Sens • [T] Turbo • [H] Bass bias • [N] Palette • [B] Bloom</div>
+  <div id="meter"><i></i></div>
 
 <script>
-/* ===== Headmosh Neon Network — FAST & LEAN (No Mouse Influence) =====
+/* ===== Headmosh Neon Network — PUNCHY REACTIVE =====
+   Stronger visual reaction, auto-gain, peak flashes, visible meter.
    Hotkeys:
-   [M] mic on/off     [A] attract/repel (kept, but no mouse pull)
-   [B] bloom          [N] palette
-   [L] logo           [G] giveaway panel
-   [K]/[J] sensitivity up/down
-   [T] turbo sensitivity
-   [H] toggle extra bass bias
-   [S] snapshot       [R] reset particles
-================================================================= */
+   [M] mic on/off  [K]/[J] sensitivity up/down  [T] turbo
+   [H] bass bias   [N] palette  [B] bloom  [L] logo  [R] reset
+================================================================ */
 
 const CONFIG = {
-  particleDensity: 0.09,
-  maxSpeed: 1.5,
-  connectRadius: 170,
-  trailAlpha: 36,
+  particleDensity: 0.10,
+  maxSpeed: 1.8,
+  connectRadius: 190,
+  trailAlpha: 34,
   bloomPasses: 1,
   showLogo: true,
-  showGiveaway: true,
+  showGiveaway: false,
   bannerTitle: "HEADMOSH STUDIO",
   bannerSub: "Go Head-First.",
   coinURL: "https://pump.fun/coin/4QCQAkcKiYPnFWsSgGMuGeQdnrAmCKcNJkd2dm59pump",
 };
-
-const MAX_CONNECTIONS_PER_PARTICLE = 20;
+const MAX_CONNECTIONS_PER_PARTICLE = 22;
 
 let particles = [];
 let pg, t = 0;
-let attract = true; // kept for compatibility (no effect on mouse)
 let bloom = true;
 let palettes, paletteIndex = 0;
 
 // Audio
 let mic, fft, amp, peakLow;
 let audioEnabled = false;
-let energy = 0;
-let sensitivity = 1.35;
+let energy = 0;                 // final visual envelope (0..1+)
+let sensitivity = 1.6;          // baseline higher for visibility
 let extraBassBias = true;
 
-// Ticker
-let tickerMsg = "Headmosh — Fast & Lean • Zine Lab • PumpFun link in title •";
-let tickerX = 0;
+// Auto-gain / normalization for amplitude
+let rms = 0;                    // rolling average of amplitude
+const RMS_ATTACK = 0.12;        // how quickly avg adapts up
+const RMS_DECAY  = 0.01;        // how slowly avg falls
 
 // URL overrides
 (function initParams(){
@@ -90,24 +86,22 @@ class Particle {
     this.vy = random(-CONFIG.maxSpeed, CONFIG.maxSpeed);
   }
   move(){
-    // Flow field motion only (no mouse influence)
-    const ang = noise(this.x*0.0012, this.y*0.0012, t*0.001) * TAU * (1.1 + energy*1.2);
-    const push = (0.026 + energy*0.06 + energy*energy*0.12) * sensitivity;
-    this.vx += Math.cos(ang) * push;
-    this.vy += Math.sin(ang) * push;
+    // Stronger push from audio energy
+    const ang = noise(this.x*0.0012, this.y*0.0012, t*0.001) * TAU * (1.1 + energy*1.4);
+    const punch = (0.03 + energy*0.11 + energy*energy*0.16) * sensitivity;
+    this.vx += Math.cos(ang) * punch;
+    this.vy += Math.sin(ang) * punch;
 
-    // Speed clamp
+    // clamp speed
     const sp = Math.hypot(this.vx, this.vy);
     if (sp > CONFIG.maxSpeed){
       this.vx = (this.vx/sp)*CONFIG.maxSpeed;
       this.vy = (this.vy/sp)*CONFIG.maxSpeed;
     }
 
-    // Integrate
     this.x += this.vx;
     this.y += this.vy;
 
-    // Wrap
     if (this.x < -12) this.x = width+12;
     if (this.x > width+12) this.x = -12;
     if (this.y < -12) this.y = height+12;
@@ -115,8 +109,8 @@ class Particle {
   }
   dot(g){
     g.noStroke();
-    g.fill(255, 235);
-    g.circle(this.x, this.y, 2.6 + energy*1.0);
+    g.fill(255, 220);
+    g.circle(this.x, this.y, 3.2 + energy*2.2);
   }
   connect(g, others){
     const cols = palettes[paletteIndex];
@@ -126,17 +120,18 @@ class Particle {
       const dx = this.x - p.x, dy = this.y - p.y;
       const d = Math.hypot(dx, dy);
       if (d < CONFIG.connectRadius){
-        const widthBoost = 1.0 + energy*2.0 + energy*energy*1.2;
-        const w = map(d, 0, CONFIG.connectRadius, 2.4*widthBoost, 0.25);
-        const a = map(d, 0, CONFIG.connectRadius, 236, 110);
+        // much stronger width/alpha mod from energy
+        const widthBoost = 1.0 + energy*3.4 + energy*energy*1.8;
+        const w = map(d, 0, CONFIG.connectRadius, 3.6*widthBoost, 0.35);
+        const a = map(d, 0, CONFIG.connectRadius, 250, 90);
         const c = cols[Math.floor(map(d,0,CONFIG.connectRadius,0,cols.length))%cols.length];
 
         g.stroke(c[0], c[1], c[2], a);
         g.strokeWeight(w);
 
-        const j = 6*(1+energy);
-        const mx = (this.x + p.x)/2 + Math.sin((this.x+t)*0.012)*j;
-        const my = (this.y + p.y)/2 + Math.cos((this.y+t)*0.012)*j;
+        const j = 8*(1+energy*1.2); // more jitter on hits
+        const mx = (this.x + p.x)/2 + Math.sin((this.x+t)*0.014)*j;
+        const my = (this.y + p.y)/2 + Math.cos((this.y+t)*0.014)*j;
         g.noFill();
         g.beginShape();
         g.curveVertex(this.x, this.y);
@@ -168,10 +163,10 @@ function setup(){
   initParticles();
   pg.background(0);
 
-  // Fast-react audio
-  fft = new p5.FFT(0.2, 1024);
-  amp = new p5.Amplitude(0.04);
-  peakLow = new p5.PeakDetect(40, 140, 0.10, 15);
+  // More responsive audio chain
+  fft = new p5.FFT(0.08, 2048);      // lower smoothing, more bins
+  amp = new p5.Amplitude(0.02);      // very fast amplitude tap
+  peakLow = new p5.PeakDetect(38, 160, 0.10, 20); // sensitive lows
 }
 
 function initParticles(){
@@ -181,13 +176,13 @@ function initParticles(){
 }
 
 function drawBackground(g){
-  const cx = width*0.5 + Math.sin(t*0.001)*66;
-  const cy = height*0.5 + Math.cos(t*0.0012)*50;
-  for (let r = Math.max(width,height); r>0; r -= 8){
+  const cx = width*0.5 + Math.sin(t*0.0012)*80*(0.6+energy);
+  const cy = height*0.5 + Math.cos(t*0.0011)*60*(0.6+energy);
+  for (let r = Math.max(width,height); r>0; r -= 7){
     const k = map(r, 0, Math.max(width,height), 0, 1);
-    const v = 8 + 20*(1-k)*(0.5+0.5*Math.sin(t*0.002+energy*2.4));
+    const v = 10 + 26*(1-k)*(0.5+0.5*Math.sin(t*0.002+energy*3.2));
     g.noStroke();
-    g.fill(v, v*0.8, v*0.9, 14);
+    g.fill(v, v*0.8, v*0.9, 16);
     g.circle(cx, cy, r*2);
   }
 }
@@ -195,28 +190,40 @@ function drawBackground(g){
 function draw(){
   t++;
 
-  // ---------- ENERGY ENVELOPE ----------
-  const ATTACK = 0.9;
-  const DECAY  = 0.18;
-  const BASS_BIAS = extraBassBias ? 0.70 : 0.55;
+  // ---------- ENERGY ENVELOPE (LOUD) ----------
+  const ATTACK = 0.95;
+  const DECAY  = 0.22;
+  const BASS_BIAS = extraBassBias ? 0.78 : 0.60;
 
   let target = 0;
+  let levelVis = 0;
+
   if (audioEnabled){
     const spectrum = fft.analyze();
-    const low  = fft.getEnergy(40, 140);
-    const mid  = fft.getEnergy(140, 1200);
-    const high = fft.getEnergy(1200, 6000);
+    const low  = fft.getEnergy(38, 160);
+    const mid  = fft.getEnergy(160, 1500);
+    const high = fft.getEnergy(1500, 6000);
 
-    let e = (low * BASS_BIAS + mid * 0.25 + high * 0.05) / 255;
+    let e = (low * BASS_BIAS + mid * 0.22 + high * 0.06) / 255;
 
-    const lvl = amp.getLevel();
-    e = Math.max(e, lvl * 3.5);
+    // amplitude auto-gain
+    const lvl = amp.getLevel();   // ~0..0.3 typical
+    // update rolling RMS (auto gain reference)
+    const targetRms = lvl;
+    if (targetRms > rms) rms += (targetRms - rms) * RMS_ATTACK;
+    else rms += (targetRms - rms) * RMS_DECAY;
 
+    const norm = rms > 0.0005 ? constrain(lvl / (rms*1.2), 0, 3.0) : 0;
+    e = Math.max(e, norm * 0.9);   // give amplitude a strong say
+
+    // Peaks: add a big punch
     peakLow.update(fft);
-    if (peakLow.isDetected) e = Math.min(1, e + 0.45);
+    if (peakLow.isDetected) e = Math.min(1.6, e + 0.55); // allow >1 for extra kick
 
-    target = Math.min(1, e * sensitivity);
+    target = Math.min(1.6, e * sensitivity); // allow >1 to exaggerate
+    levelVis = norm; // for on-screen meter
   }
+
   energy += (target - energy) * (target > energy ? ATTACK : DECAY);
 
   // ---------- Render ----------
@@ -233,6 +240,15 @@ function draw(){
     p.connect(pg, particles.slice(i+1));
   }
 
+  // mild global flash on heavy hits
+  if (energy > 1.1){
+    push();
+    drawingContext.globalCompositeOperation = 'screen';
+    fill(255, 255, 255, map(energy,1.1,1.6,10,40));
+    rect(0,0,width,height);
+    pop();
+  }
+
   image(pg, 0, 0);
 
   if (bloom){
@@ -245,9 +261,8 @@ function draw(){
   if ((frameCount & 3) === 0) scanlines();
 
   drawBanner();
-  drawTicker();
-  if (CONFIG.showGiveaway) drawGiveawayPanel();
-  drawHUD();
+  drawHUD(levelVis);
+  // giveaway panel optional
 }
 
 function scanlines(){
@@ -281,47 +296,14 @@ function drawBanner(){
   pop();
 }
 
-function drawTicker(){
-  const msg = tickerMsg + "  ";
-  textSize(16);
-  const tw = textWidth(msg);
-  tickerX -= (2.4 + energy*4.8);
-  if (tickerX < -tw) tickerX += tw;
-  noStroke();
-  fill(0,140);
-  rect(0, height-40, width, 40);
-  fill(230);
-  textAlign(LEFT, CENTER);
-  text(msg, tickerX, height-20);
-  text(msg, tickerX + tw, height-20);
-}
+function drawHUD(levelVis=0){
+  // live meter bar
+  const meter = document.querySelector('#meter > i');
+  if (meter){
+    meter.style.width = Math.min(1, levelVis).toFixed(3) * 100 + '%';
+  }
 
-function drawGiveawayPanel(){
-  const now = new Date();
-  const nextHour = new Date(now);
-  nextHour.setMinutes(0,0,0);
-  if (nextHour <= now) nextHour.setHours(nextHour.getHours()+1);
-  const ms = nextHour - now;
-  const sec = Math.floor(ms/1000)%60;
-  const min = Math.floor(ms/60000);
-
-  const w = 210, h = 86;
-  const x = width - w - 18, y = 18;
-
-  noStroke();
-  fill(0,150);
-  rect(x, y, w, h, 14);
-  fill(200,230,255);
-  textAlign(CENTER,CENTER);
-  textSize(14);
-  text("Giveaway in", x+w/2, y+24);
-  textSize(32);
-  fill(255);
-  text(nf(min,2)+":"+nf(sec,2), x+w/2, y+56);
-}
-
-function drawHUD(){
-  const hud = `[K/J] Sens ${sensitivity.toFixed(2)}  [T] Turbo  [H] Bass ${extraBassBias?"BIAS":"norm"}  [A] ${attract?"Attract":"Repel"}  [B] Bloom ${bloom?"On":"Off"}  [N] Palette  [L] Logo`;
+  const hud = `Sens ${sensitivity.toFixed(2)}  Bass ${extraBassBias?"BIAS":"norm"}  Energy ${energy.toFixed(2)}  RMS ${rms.toFixed(4)}  [M] Mic [K/J] Sens [T] Turbo [H] Bass [N] Palette [B] Bloom [L] Logo [R] Reset`;
   const w = textWidth(hud) + 24;
   noStroke();
   fill(0, 140);
@@ -334,17 +316,14 @@ function drawHUD(){
 
 function keyPressed(){
   if (key==='M'||key==='m') toggleMic();
-  if (key==='A'||key==='a') attract = !attract; // no mouse effect, safe to keep
   if (key==='B'||key==='b') bloom = !bloom;
   if (key==='N'||key==='n') paletteIndex = (paletteIndex+1)%palettes.length;
   if (key==='L'||key==='l') CONFIG.showLogo = !CONFIG.showLogo;
-  if (key==='G'||key==='g') CONFIG.showGiveaway = !CONFIG.showGiveaway;
-  if (key==='S'||key==='s') saveCanvas('headmosh-fast-lean','png');
   if (key==='R'||key==='r') initParticles();
 
-  if (key==='K'||key==='k') sensitivity = Math.min(3.0, sensitivity + 0.05);
-  if (key==='J'||key==='j') sensitivity = Math.max(0.5, sensitivity - 0.05);
-  if (key==='T'||key==='t') sensitivity = Math.min(3.0, sensitivity + 0.25);
+  if (key==='K'||key==='k') sensitivity = Math.min(3.2, sensitivity + 0.08);
+  if (key==='J'||key==='j') sensitivity = Math.max(0.5, sensitivity - 0.08);
+  if (key==='T'||key==='t') sensitivity = Math.min(3.2, sensitivity + 0.35);
   if (key==='H'||key==='h') extraBassBias = !extraBassBias;
 }
 
@@ -373,7 +352,7 @@ async function toggleMic(){
   } catch(e){
     console.warn('Mic error:', e);
     document.getElementById('mic-hint').textContent =
-      'Mic blocked — enable permissions or use OBS Audio Monitor. Press M to retry.';
+      'Mic blocked — enable permissions or use Chrome site mic settings (choose BlackHole). Press M to retry.';
   }
 }
 </script>
