@@ -1,75 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Headmosh Zapette Visualizer</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Audio Test Visualizer</title>
 <style>
   html,body { margin:0; padding:0; background:#000; overflow:hidden; }
   canvas { display:block; }
 </style>
+<!-- p5.js core + sound -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
 </head>
 <body>
 <script>
-let zapette, mic, fft, peak;
-const moshLines = [
-  "Fold your brain like a zine.",
-  "Lake Michigan knows the password.",
-  "Draw first, explain never.",
-  "Crypto is just crayons with Wi-Fi.",
-  "Permission to mosh: granted."
-];
-let currentLine = "";
-
-function preload(){
-  // IMPORTANT: place a transparent PNG named Zapette.png in the same folder
-  zapette = loadImage("Zapette.png");
-}
+let mic;
 
 function setup(){
   createCanvas(windowWidth, windowHeight);
-  // Audio input
+  // ask for mic permission (select BlackHole in browser settings)
   mic = new p5.AudioIn();
   mic.start();
-  fft = new p5.FFT();
-  fft.setInput(mic);
-  peak = new p5.PeakDetect(20,200,"bass");
-  currentLine = random(moshLines);
-  textFont("Courier New");
-  textAlign(CENTER,CENTER);
+  noStroke();
 }
 
 function draw(){
-  background(10);
-
-  fft.analyze();
-  peak.update(fft);
-
-  // on bass peak choose a new line
-  if (peak.isDetected) currentLine = random(moshLines);
-
-  // scale character to bass energy
-  let bass = fft.getEnergy("bass");
-  let beatScale = map(bass,0,255,0.8,1.3);
-
-  push();
-  translate(width/2,height/2);
-  imageMode(CENTER);
-  scale(beatScale);
-  image(zapette,0,0,zapette.width*0.6,zapette.height*0.6);
-  pop();
-
-  // speech text
-  fill(255);
-  textSize(24);
-  text(currentLine,width/2,height*0.8);
+  background(0);
+  // get mic level (0–1)
+  let level = mic.getLevel();
+  // map to circle size
+  let size = map(level, 0, 0.3, 50, width);
+  fill(0, 255, 180);
+  ellipse(width/2, height/2, size, size);
 }
 
 function windowResized(){
-  resizeCanvas(windowWidth,windowHeight);
+  resizeCanvas(windowWidth, windowHeight);
 }
 </script>
 </body>
 </html>
+
